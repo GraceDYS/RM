@@ -1,0 +1,627 @@
+#implement a decision tree
+#implement a random forest
+
+import math
+import random
+#import matplotlib.pyplot as plt
+from IPython.display import Image
+import sklearn.tree as tree
+import pydotplus
+
+#read data
+def read_data(data_path):
+    result=[]
+    
+    file=open(data_path,'r')
+    result=file.readlines()
+
+    return result
+
+#get feature_list and classification_list
+def analyze_dataset(oringinal_dataset):
+    feature_set=[]
+    classification_set=[]
+    feature=[]
+    
+    for ori_data in oringinal_dataset:
+        if(len(ori_data.strip())==32):
+            feature.append(ori_data)
+        elif(len(ori_data.strip())==1):
+            feature_set.append(feature)
+            feature=[]
+            classification_set.append(ori_data)
+    
+    return feature_set,classification_set
+
+#convert image to feature
+def image2feature(image_set):
+    feature_set=[]
+    for image in image_set:
+        feature=[]
+        for line in image:
+            sum=0
+            for pixel in line:
+                if(pixel=='1'):
+                    sum=sum+1
+            feature.append(sum)
+        feature_set.append(feature)
+        
+    return feature_set
+
+#calculate entropy
+def entropyCalculation(classification_set):
+    #H(X)=-sum[p(x)*log2(p(x))]
+    entropy=0
+    
+    #calculate probabilities of each digit
+    probability=[0,0,0,0,0,0,0,0,0,0]
+    for digit in classification_set:
+        for i in range(10):
+            if digit.strip()==str(i):
+                probability[i]=probability[i]+1    
+    for i in range(10):
+        probability[i]=probability[i]/(len(classification_set))
+#        print(probability[i])
+        
+    #calculate entropy
+    for i in range(10):
+        entropy=entropy+probability[i]*math.log(probability[i],2)
+        
+    entropy=0-entropy
+    
+    return entropy
+
+#calculte conditional entropy
+def calculateConditionalEntropy(feature_set,classification_set):
+    conEntropy=[0 for n in range(32)]
+    p_x_f=[[[0 for n in range(10)]for n in range(33)]for i in range(32)]
+    
+    for i in range(len(feature_set)):
+        for j in range(32):
+            for k in range(33):
+                if feature_set[i][j]==k:
+                    index=int(classification_set[i].strip())
+                    p_x_f[j][k][index]=p_x_f[j][k][index]+1
+                    
+    record_count=len(feature_set)
+    count_fv=[[0 for n in range(33)] for n in range(32)]
+    for i in range(32):
+        for j in range(33):
+            for k in range(10):
+                count_fv[i][j]=count_fv[i][j]+p_x_f[i][j][k]
+                
+    #calculate conditional entorpy
+    for i in range(32):
+        for j in range(33):
+            for k in range(10):
+                if(p_x_f[i][j][k]!=0):
+                    conEntropy[i]=conEntropy[i]-count_fv[i][j]/record_count*math.log2(p_x_f[i][j][k]/count_fv[i][j])*p_x_f[i][j][k]/count_fv[i][j]
+       
+    return conEntropy
+
+#calculate information gain
+#measure the gain from a particular feature
+def informationGainCalculation(entropy,conEntropy):
+    #1.entropy before splite
+    #2.weighted average entropy after the split
+    #3.take the differenve of these
+    #I(T;W)=H(T)-H(T|W)
+    informationGain=[0 for i in range(32)]
+    
+    for i in range(32):
+        informationGain[i]=entropy-conEntropy[i]
+    
+    return informationGain
+
+#order feature by infoGain from largest to smallest
+def getFeatureIndexInfo(infoGain,sub_feature_index):
+    bestFeature=sub_feature_index[0]
+    temp_max=infoGain[bestFeature]
+    
+    for i in sub_feature_index:
+        if infoGain[i]>temp_max:
+            bestFeature=i
+            temp_max=infoGain[bestFeature]
+    
+#    print("return best feature")
+    
+    return bestFeature
+
+#get best feature value for spliting
+def getBestValue(feature_set,feature_index,classification_dataset,entropy):
+    #get feature[index]
+    feature_i_cnt=[[0 for n in range(10)]for n in range(33)]
+    feature_entropy=entropy
+    feature_info_gain=[0 for n in range(33)]
+    #count appearance
+    for i in range(len(feature_set)):
+        for j in range(10):
+            if(classification_dataset[i]==j):
+                #feature_set[i][feature_index]:0~32
+                feature_i_cnt[feature_set[i][feature_index]][j]=feature_i_cnt[feature_set[i][feature_index]][j]+1
+    
+    #count conditional entropy
+    p_feature_i=[0 for n in range(33)]
+    for i in range(33):
+        fvi=0
+        for j in range(10):
+            fvi=fvi+feature_i_cnt[i][j]
+        for j in range(10):
+            if fvi!=0 and feature_i_cnt[i][j]!=0:
+                p_feature_i[i]=p_feature_i[i]-fvi/len(feature_set)*(feature_i_cnt[i][j]/fvi*math.log(feature_i_cnt[i][j]/fvi,2))
+        feature_info_gain[i]=feature_entropy-p_feature_i[i]
+    
+    #find best value
+    fv_weight=[0 for n in range(33)]
+    
+    
+    for i in range(33):
+        index=i
+        temp_max=feature_info_gain[i]
+        for j in range(33):
+            if(i!=j):
+                if(feature_info_gain[j]>temp_max):
+                    temp_max=feature_info_gain[j]
+                    index=j
+        feature_info_gain[index]=0
+        fv_weight[i]=index
+        
+    
+#    print("return best value")
+#    print(fv_weight)
+    
+    return fv_weight
+
+#get result
+def getResult(classification_set,index_set):
+    results=[0 for n in range(10)]
+    for i in index_set:
+        results[classification_set[i]]=results[classification_set[i]]+1
+    
+    return results
+
+#check whether to split by this value
+def checkContinueSplit(sub_results,origin_results):
+#    print("check split")
+#    print(sub_results,origin_results)
+    isValid=False
+    if(len(sub_results)>0 and len(origin_results)>0):
+        for i in range(10):
+            if sub_results[i]!=origin_results[i]:
+                isValid=True
+    return isValid
+
+#whether to converge dataset
+def convergeDataset(subA_results,subB_results):
+    willConverge=True
+    if(len(subA_results)>0 and len(subB_results)>0):
+#        print(len(subA_results),len(subB_results))
+        for i in range(10):
+            if subA_results[i]!=subB_results[i]:
+                willConverge=False
+    else:
+        willConverge=False
+    return willConverge
+    
+#normalize results
+def normalizeResults(results):
+    for i in range(10):
+        #noramalization results(may not be !=0 to allow for some error)
+        if results[i]>standard_set[i]:
+            results[i]=1
+        else:
+            results[i]=0
+    
+    return results
+
+#change classification_dataset from str to integer
+def intClassification_dataset(classification_dataset):
+    new_class=[0 for n in range(len(classification_dataset))]
+    for i in range(len(classification_dataset)):
+        new_class[i]=int(classification_dataset[i].strip())
+    
+    return new_class
+            
+#split dataset by feature calue
+def splitDatasetByValue(feature_value_key_set,judge_feature_index,judge_feature_value_index,feature_value_weight,index_set,feature_set,classification_set,results):
+    for i in range(len(feature_value_key_set)):
+        feature_value_set=feature_value_key_set[i]
+        this_index=index_set[i]
+        this_result=results[i]
+        sub_feature_set=[]
+        sub_result_set=[]
+        sub_index_set=[]
+        
+        judge_feature_value=feature_value_weight[judge_feature_value_index]
+#        print("new split by value")
+#        print(judge_feature_value,feature_value_set)
+        if judge_feature_value in feature_value_set and len(feature_value_set)!=1:
+            
+            #divide feature value of feature X
+            #create related index_set & result_set
+    #        print("feature_value_set")
+    #        print(feature_value_set)
+            if len(feature_value_set[:feature_value_set.index(judge_feature_value)])>0:
+    #            print(feature_value_set[:judge_feature_value])
+                sub_feature_set.append(feature_value_set[:feature_value_set.index(judge_feature_value)])
+                sub_result_set.append([0 for n in range(10)])
+                sub_index_set.append([])
+            sub_feature_set.append([judge_feature_value])
+            sub_result_set.append([0 for n in range(10)])
+            sub_index_set.append([])
+            if feature_value_set[feature_value_set.index(judge_feature_value)+1:]:
+                sub_feature_set.append(feature_value_set[feature_value_set.index(judge_feature_value)+1:])
+                sub_result_set.append([0 for n in range(10)])
+                sub_index_set.append([])
+            
+#            print("sub_feature_value")
+#            print(sub_feature_set)
+#            print(sub_index_set)
+#            
+            #divide index_set according to feature value of feature X
+            #count possible numbers
+            for j in this_index:
+    #            print(feature_set[j][judge_feature_index])
+                if feature_set[j][judge_feature_index]==judge_feature_value:
+                    sub_index_set[sub_feature_set.index([judge_feature_value])].append(j)
+                    sub_result_set[sub_feature_set.index([judge_feature_value])][classification_set[j]]+=1
+                elif feature_set[j][judge_feature_index]<judge_feature_value and feature_set[j][judge_feature_index] in feature_value_set:
+                    sub_index_set[sub_feature_set.index([judge_feature_value])-1].append(j)
+                    sub_result_set[sub_feature_set.index([judge_feature_value])-1][classification_set[j]]+=1
+                elif feature_set[j][judge_feature_index]>judge_feature_value and feature_set[j][judge_feature_index] in feature_value_set:
+                    sub_index_set[sub_feature_set.index([judge_feature_value])+1].append(j)
+                    sub_result_set[sub_feature_set.index([judge_feature_value])+1][classification_set[j]]+=1
+                    
+#            print("sub_result_cnt:",sub_result_set)
+                    
+            for j in range(len(sub_result_set)):
+                sub_result_set[j]=normalizeResults(sub_result_set[j])
+                
+#            print("sub_result_set")
+#            print(sub_result_set)
+                
+            #check whether is effective split
+            if(not checkContinueSplit(sub_result_set[sub_feature_set.index([judge_feature_value])],this_result)):
+                #if subresults==original results, it is not valid,delete all,go back
+#                print("invalid split")
+                sub_feature_set.clear()
+                sub_result_set.clear()
+                sub_index_set.clear()
+                return
+            else:
+                #if valid split
+#                print("valid split")
+                #converge datasets which have the same results
+                for j in range(len(sub_feature_set)):
+                    for k in range(j+1,len(sub_feature_set)):
+    #                    print(j,sub_result_set[j])
+    #                    print(k,sub_result_set[k])
+                        if(convergeDataset(sub_result_set[j],sub_result_set[k])):
+                            
+#                            print("converge %d,%d",j,k)
+                            sub_feature_set[j].extend(sub_feature_set[k])
+                            sub_feature_set[k]=[]
+                            sub_index_set[j].extend(sub_index_set[k])
+                            sub_index_set[k]=[]
+                            sub_result_set[k]=[]
+#                            print(sub_result_set)
+                    
+                len_sub=len(sub_feature_set)
+                temp_cnt=0
+                while temp_cnt<len_sub:
+                    if(not sub_feature_set[temp_cnt]):
+#                        print("del...")
+                        del sub_feature_set[temp_cnt]
+                        del sub_result_set[temp_cnt]
+                        del sub_index_set[temp_cnt]
+                        temp_cnt=temp_cnt-1
+                        len_sub=len_sub-1
+                    temp_cnt=temp_cnt+1
+#                print(sub_result_set)
+                #split each sub_dataset by new feature value 
+                judge_feature_value_index-=1
+#                print("judge_feature_value_index")
+#                print(judge_feature_value)
+                feature_value_key_set.remove(feature_value_set)
+                index_set.remove(this_index)
+                results.remove(this_result)
+                for j in range(len(sub_feature_set)):
+                    feature_value_key_set.append(sub_feature_set[j])
+                    index_set.append(sub_index_set[j])
+                    results.append(sub_result_set[j])
+                    
+                
+                
+#                print("temp_feature_value_key_set:",feature_value_key_set)
+#                print("temp_result_set:",results)
+                splitDatasetByValue(feature_value_key_set,judge_feature_index,judge_feature_value_index,feature_value_weight,index_set,feature_set,classification_set,results)
+        
+#split dataset by feature
+def splitDatasetByFeature(feature_set,classification_set,conditionalEntropy,fatherTree,feature_num,infoGain):
+    #depth:which feature is used for judging in this turn
+    #get depth
+    depth=fatherTree["depth"]
+    judge_feature_index=fatherTree["splitFeature"]
+
+    #get original results
+    results=fatherTree["results"]
+    #get dataset scale
+    index_set=[]
+    index=fatherTree["index_set"]
+    index_set.append(index)
+    result_set=[]
+    result_set.append(results)
+    
+    #get value weight for this feature to prepare for spliting dataset by this feature
+    conEntropy=conditionalEntropy[judge_feature_index]                                                  #list[conditionalEntropy 0~31] len:32
+    feature_value_weight=getBestValue(feature_set,judge_feature_index,classification_set,conEntropy)    #list[int 0~32] len:33
+    feature_value_key_set=[[i for i in range(33)]]
+    judge_feature_value_index=-1
+    splitDatasetByValue(feature_value_key_set,judge_feature_index,judge_feature_value_index,feature_value_weight,index_set,feature_set,classification_set,result_set)
+    
+    for j in range(len(feature_value_key_set)):
+        for k in range(j+1,len(feature_value_key_set)):
+            if(convergeDataset(result_set[j],result_set[k])):
+#                print("total converge",j,k)
+                feature_value_key_set[j].extend(feature_value_key_set[k])
+                feature_value_key_set[k]=[]
+                feature_value_key_set[j].sort()
+                index_set[j].extend(index_set[k])
+                index_set[k]=[]
+                result_set[k]=[]
+    
+    len_fea=len(feature_value_key_set)
+    temp_i=0
+    while temp_i<len_fea:
+        if(not feature_value_key_set[temp_i]):
+#            print("del from total...")
+            del feature_value_key_set[temp_i]
+            del result_set[temp_i]
+            del index_set[temp_i]
+            temp_i=temp_i-1
+            len_fea=len_fea-1
+        temp_i=temp_i+1
+    
+#    print("depth:",depth)
+#    print("temp_feature_value_key_set:",feature_value_key_set)
+#    print("temp_result_set:",result_set)
+    
+    #select m sub features
+    sub_feature_index=getSubFeatureSets(feature_num)              
+    bestFeature=getFeatureIndexInfo(infoGain,sub_feature_index)
+    
+    depth=depth+1
+    
+    for i in range(len(feature_value_key_set)):
+        fatherTree[str(feature_value_key_set[i])]={}
+        fatherTree[str(feature_value_key_set[i])]["results"]=result_set[i]
+        fatherTree[str(feature_value_key_set[i])]["depth"]=depth
+        fatherTree[str(feature_value_key_set[i])]["index_set"]=index_set[i]
+        fatherTree[str(feature_value_key_set[i])]["featureValue"]=feature_value_key_set[i]
+        fatherTree[str(feature_value_key_set[i])]["splitFeature"]=bestFeature
+        
+        
+        #if there is only one kind in subtree, no need to split
+        if(sum(result_set[i])==1):
+            for j in range(10):
+                if result_set[i][j]==1:
+                    fatherTree[str(feature_value_key_set[i])]=j
+#                    print("temp_level:",fatherTree[str(feature_value_key_set[i])])
+        elif(sum(result_set[i])>1):       
+#            print("temp_level:",fatherTree[str(feature_value_key_set[i])])
+            splitDatasetByFeature(feature_set,classification_set,conditionalEntropy,fatherTree[str(feature_value_key_set[i])],feature_num,infoGain)
+        
+    return
+
+#get sub feature sets
+def getSubFeatureSets(feature_num):
+    sub_feature_index=[]
+    while(len(sub_feature_index)<feature_num):
+        i=random.randint(0,31)
+        if i not in sub_feature_index:
+            sub_feature_index.append(i)
+            
+#    print("return sub feature sets")
+    
+    return sub_feature_index
+
+#create decisonTree in the form of dictionary
+def createDecisionTree(feature_set,classification_dataset,index_set,feature_num):
+    decisionTree={}
+    #depth:which feature is for judging at this level
+    depth=0
+    decisionTree["depth"]=depth
+    
+    #select m features
+    sub_feature_index=getSubFeatureSets(feature_num)
+                
+    #calculate entropy
+    entropy=entropyCalculation(classification_dataset)
+    #calculate conditionalEntropy
+    conditionalEntropy=calculateConditionalEntropy(feature_set,classification_dataset)
+    #calculate infoGain
+    infoGain=informationGainCalculation(entropy,conditionalEntropy)
+    #get best feature for this split
+    bestFeature=getFeatureIndexInfo(infoGain,sub_feature_index)
+    decisionTree["splitFeature"]=bestFeature
+#    print(bestFeature)
+    
+    classification_set=intClassification_dataset(classification_dataset)
+
+    #count the possible result value for this dataset
+    results=[0 for i in range(10)]
+    global standard_set
+    standard_set=[0 for i in range(10)]
+    
+    for i in index_set:
+        results[classification_set[i]]=results[classification_set[i]]+1
+    
+#    print(results)
+    
+    for i in range(10):
+        standard_set[i]=round(0.2*results[i])
+    results=normalizeResults(results)
+#    print(results)
+#    print(standard_set)
+    decisionTree["results"]=results
+    decisionTree["index_set"]=index_set
+        
+    splitDatasetByFeature(feature_set,classification_set,conditionalEntropy,decisionTree,feature_num,infoGain)
+    
+    return decisionTree
+
+#get sub datasets
+def getSubDataset(feature_set,classification_set):
+    sub_feature_set=[]
+    sub_classification_set=[]
+    
+    size=len(feature_set)
+    
+    while len(sub_feature_set)<size:
+        i=random.randint(0,size-1)
+        sub_feature_set.append(feature_set[i])
+        sub_classification_set.append(classification_set[i])
+    
+#    print("return subDataset")
+        
+    return sub_feature_set,sub_classification_set
+
+
+#build random forest
+def buildRandomForest(tree_num,feature_num,feature_set,classification_set):
+    trees=[]
+    cnt_tree=0
+    while(cnt_tree<tree_num):
+        #bagging training samples
+        t_feature_set,t_classification_set=getSubDataset(feature_set,classification_set)
+        #build decision tree
+        index_set=[i for i in range(len(t_feature_set))]
+        tree=createDecisionTree(t_feature_set,t_classification_set,index_set,feature_num)
+        
+        trees.append(tree)
+        cnt_tree=cnt_tree+1
+#        print("tree",cnt_tree,":")
+#        print(tree)
+#    
+    return trees
+
+#predict by decisionTree
+def predictByDecisionTree(decisionTree,feature_set,tree_vote):
+#    print("error",decisionTree['splitFeature'])
+    feature=feature_set[decisionTree["splitFeature"]]
+    for key in decisionTree:
+        if "[" in key:
+            valueset=key.strip('[')
+            valueset=valueset.strip(']')
+            valueset=valueset.split(",")
+#            print("valueset:",valueset)
+            for value in valueset:
+#                print("value:",value)
+                valueset[valueset.index(value)]=int(value)
+            if feature in valueset:
+                if type(decisionTree[key])==type({}):
+                    #if is dictionary,continue
+#                    print("valueset:",valueset)
+#                    print(feature)
+#                    print("error",decisionTree[key])
+                    predictByDecisionTree(decisionTree[key],feature_set,tree_vote)
+                elif type(decisionTree[key]==type(0)):
+                    #get result
+                    tree_vote[decisionTree[key]]+=1
+
+#calculate accuracy
+def testRandomForest(test_feature_set,test_classification_set,randomForest):
+    cnt_samples=len(test_feature_set)
+    cnt_correct_samples=0
+    
+    for i in range(cnt_samples):
+        vote=[0 for n in range(10)]
+        real_result=test_classification_set[i]
+        if type(real_result)==type("1"):
+            real_result=int(real_result)
+        feature_set=test_feature_set[i]
+        for tree in randomForest:
+            t_vote=[0 for n in range(10)]
+            predictByDecisionTree(tree,feature_set,t_vote)
+            if(sum(t_vote)==0):
+                t_result=-1
+            else:
+                t_result=0
+                for j in range(10):
+                    if(t_vote[j]>t_vote[t_result]):
+                        t_result=j
+#            print("t_result:",t_result)
+            if t_result!=-1:
+                vote[t_result]=vote[t_result]+1
+        result=0
+        for j in range(10):
+            if vote[j]>vote[result]:
+                result=j
+#        print("result=",result,";real_result=",real_result)
+        if result==real_result:
+            cnt_correct_samples=cnt_correct_samples+1
+    
+    accuracy=cnt_correct_samples/cnt_samples
+    return accuracy
+        
+
+if __name__=='__main__':
+    data_path="optdigits-orig.tra"
+    #read oringinal data
+    oringinal_dataset=read_data(data_path)
+    #get images and classifications
+    image_dataset,classification_dataset=analyze_dataset(oringinal_dataset)
+    #convert image to feature
+    feature_set=image2feature(image_dataset)
+#    print(classification_dataset[:10])
+#    print(oringinal_dataset[:25])
+#    print(feature_set[0])
+#    print(image_dataset[0])
+#    print(len(image_dataset[0]))
+    size=len(feature_set)
+    
+    test_feature_set=feature_set[:size-350]
+    test_classification_set=classification_dataset[:size-350]
+    test_featureset = feature_set[size - 300:]
+    test_classificationset = classification_dataset[size - 300:]
+    tree_num = [20,40,60,80,100]
+    #tree = 7
+    #feature_num = [8,10,12,14,16,18]
+    feature = 12
+    acclist = []
+    #t_feature, t_classification_set = getSubDataset(feature_set, classification_dataset)
+    index_set = [i for i in range(len(feature_set))]
+    t = createDecisionTree(feature_set,classification_dataset,index_set,5)
+    for i in t.items():
+        print(i)
+
+    #dot_data = tree.export_graphviz(t)
+    #graph = pydotplus.graph_from_dot_data(dot_data)
+    #Image(graph.create_png())
+
+'''
+
+#    randomForest=buildRandomForest(tree_num,feature_num,feature_set,classification_dataset)
+    for tree in tree_num:
+        randomForest=buildRandomForest(tree,feature,test_feature_set,test_classification_set)
+        acc = testRandomForest(test_featureset, test_classificationset, randomForest)
+        acclist.append(acc)
+    #dict_file=open("randomForest.txt",'w')
+    #dict_file.write(str(randomForest))
+    #dict_file.close()
+    
+#    print(randomForest)
+    
+    #test randomForest
+
+
+    #print(acclist)
+    #print("tree_num:",tree_num)
+    #print("feature_num:",feature_num)
+    #print("acc:",acc)
+    plt.plot(tree_num,acclist)
+    plt.title('accuracy with different n (k=16)')
+    plt.xlabel('n')
+    plt.ylabel('accuracy')
+    plt.show()
+ '''
